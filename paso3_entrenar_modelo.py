@@ -21,8 +21,8 @@ MODEL_DIR = os.path.join(BASE_DIR, "modelo_lsch")
 # Letras (deben coincidir con las del Paso 2)
 LETRAS = [
     "A", "B", "C", "D", "E", "F", "G", "H", "I",
-    "K", "L", "M", "N", "O", "P", "Q", "R", "S",
-    "T", "U", "V", "W", "X", "Y"
+    "J", "K", "L", "M", "N", "Ñ", "O", "P", "Q",
+    "R", "S", "T", "U", "V", "W", "X", "Y", "Z"
 ]
 
 

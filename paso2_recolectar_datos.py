@@ -27,10 +27,9 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "datos_lsch"
 # Abecedario dactilológico LSCH (letras estáticas para empezar)
 LETRAS = [
     "A", "B", "C", "D", "E", "F", "G", "H", "I",
-    "K", "L", "M", "N", "O", "P", "Q", "R", "S",
-    "T", "U", "V", "W", "X", "Y"
+    "J", "K", "L", "M", "N", "Ñ", "O", "P", "Q",
+    "R", "S", "T", "U", "V", "W", "X", "Y", "Z"
 ]
-# Nota: J, Ñ, Z son dinámicas (requieren movimiento), se agregan después
 
 # Cuántas muestras capturar por letra
 MUESTRAS_POR_LETRA = 100
