@@ -5,7 +5,7 @@ import os
 import json
 import time
 from tensorflow import keras
-from collections import deque
+from collections import deque, Counter
 
 # ============================================================
 # PASO 4: Predicción en vivo de LSCH
@@ -166,17 +166,17 @@ def main():
             if pred_buffer:
                 letras_validas = [l for l in pred_buffer if l != ""]
                 if len(letras_validas) > BUFFER_SIZE * 0.6:
-                    from collections import Counter
                     conteo = Counter(letras_validas)
                     letra_estable = conteo.most_common(1)[0][0]
 
-            # Agregar letra a la palabra si se mantiene estable
+            # Agregar letra a la palabra si se mantiene estable.
+            # Para repetir una letra (ej: "LL"), esconde la mano y
+            # vuelve a hacer la seña: el contador se reinicia.
             if letra_estable and letra_estable == ultima_letra:
                 letra_estable_count += 1
                 if letra_estable_count == FRAMES_PARA_CONFIRMAR:
-                    if not palabra or palabra[-1] != letra_estable:
-                        palabra += letra_estable
-                        print(f"  Letra agregada: {letra_estable} → Palabra: {palabra}")
+                    palabra += letra_estable
+                    print(f"  Letra agregada: {letra_estable} → Palabra: {palabra}")
             else:
                 letra_estable_count = 0
                 ultima_letra = letra_estable

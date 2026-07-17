@@ -87,12 +87,13 @@ def main():
     # 1. Cargar datos
     print("\n📂 Cargando datos...")
     X, y = cargar_datos()
-    print(f"\n  Total: {len(X)} muestras, {len(LETRAS)} clases")
-    print(f"  Features por muestra: {X.shape[1]}")
 
     if len(X) == 0:
         print("❌ No hay datos para entrenar. Ejecuta el Paso 2 primero.")
         return
+
+    print(f"\n  Total: {len(X)} muestras, {len(LETRAS)} clases")
+    print(f"  Features por muestra: {X.shape[1]}")
 
     # 2. Dividir en entrenamiento y prueba (80% / 20%)
     print("\n📊 Dividiendo datos (80% train, 20% test)...")

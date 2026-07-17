@@ -227,9 +227,8 @@ def main():
                         prediccion_actual = "Sin mano detectada"
                         confianza_actual = 0.0
 
-                if not modo_continuo:
-                    pass
-                else:
+                # En modo continuo, sin mano se reinicia el buffer deslizante
+                if modo_continuo:
                     buffer_frames.clear()
 
             # ---- Interfaz en pantalla ----

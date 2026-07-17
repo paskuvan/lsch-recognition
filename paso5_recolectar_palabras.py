@@ -180,22 +180,21 @@ def main():
             h, w, _ = frame.shape
             mano_detectada = False
 
+            # Cuenta regresiva (independiente de si hay mano visible)
+            if cuenta_regresiva > 0:
+                elapsed = time.time() - cuenta_inicio
+                if cuenta_regresiva - elapsed <= 0:
+                    # Empezar a grabar
+                    grabando = True
+                    secuencia_actual = []
+                    cuenta_regresiva = 0
+                    print(f"  🔴 ¡GRABANDO!")
+
             # Detectar mano
             if result.hand_landmarks:
                 hand_landmarks = result.hand_landmarks[0]
                 mano_detectada = True
                 dibujar_mano(frame, hand_landmarks)
-
-                # Si estamos en cuenta regresiva
-                if cuenta_regresiva > 0:
-                    elapsed = time.time() - cuenta_inicio
-                    restante = cuenta_regresiva - elapsed
-                    if restante <= 0:
-                        # Empezar a grabar
-                        grabando = True
-                        secuencia_actual = []
-                        cuenta_regresiva = 0
-                        print(f"  🔴 ¡GRABANDO!")
 
                 # Grabar frames de la secuencia
                 if grabando:

@@ -3,7 +3,6 @@ import mediapipe as mp
 import os
 import csv
 import time
-import numpy as np
 
 # ============================================================
 # PASO 2: Recolectar datos de landmarks para LSCH
@@ -143,8 +142,10 @@ def main():
 
     letra_idx = 0
     capturando = False
-    muestras_capturadas = 0
     frame_timestamp_ms = 0
+
+    # Conteo en memoria para no releer los CSV en cada frame
+    conteos = {letra: contar_muestras_existentes(letra) for letra in LETRAS}
 
     with HandLandmarker.create_from_options(options) as landmarker:
 
@@ -161,7 +162,6 @@ def main():
             result = landmarker.detect_for_video(mp_image, frame_timestamp_ms)
 
             letra_actual = LETRAS[letra_idx]
-            existentes = contar_muestras_existentes(letra_actual)
             h, w, _ = frame.shape
             mano_detectada = False
 
@@ -172,7 +172,7 @@ def main():
                 dibujar_mano(frame, hand_landmarks)
 
                 # Capturar datos si está en modo captura
-                if capturando and (existentes + muestras_capturadas) < MUESTRAS_POR_LETRA:
+                if capturando and conteos[letra_actual] < MUESTRAS_POR_LETRA:
                     coords = extraer_landmarks(hand_landmarks)
                     csv_path = os.path.join(DATA_DIR, letra_actual, f"{letra_actual}.csv")
 
@@ -183,9 +183,9 @@ def main():
                             writer.writerow(header)
                         writer.writerow(coords)
 
-                    muestras_capturadas += 1
+                    conteos[letra_actual] += 1
 
-                    if (existentes + muestras_capturadas) >= MUESTRAS_POR_LETRA:
+                    if conteos[letra_actual] >= MUESTRAS_POR_LETRA:
                         capturando = False
                         print(f"  ✅ Letra '{letra_actual}' completada!")
 
@@ -200,7 +200,7 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
 
             # Progreso
-            total = existentes + muestras_capturadas
+            total = conteos[letra_actual]
             progreso = f"{total}/{MUESTRAS_POR_LETRA}"
             cv2.putText(frame, f"Muestras: {progreso}", (20, 85),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
@@ -226,7 +226,7 @@ def main():
             # Lista de letras abajo
             y_lista = h - 30
             for i, letra in enumerate(LETRAS):
-                color = (0, 255, 0) if contar_muestras_existentes(letra) >= MUESTRAS_POR_LETRA else (150, 150, 150)
+                color = (0, 255, 0) if conteos[letra] >= MUESTRAS_POR_LETRA else (150, 150, 150)
                 if i == letra_idx:
                     color = (0, 255, 255)
                 x_pos = 15 + i * 30
@@ -247,12 +247,10 @@ def main():
                     print(f"  ⏸ Pausa")
             elif key == ord("n"):  # N = siguiente letra
                 capturando = False
-                muestras_capturadas = 0
                 letra_idx = min(letra_idx + 1, len(LETRAS) - 1)
                 print(f"\n→ Letra: {LETRAS[letra_idx]}")
             elif key == ord("p"):  # P = letra anterior
                 capturando = False
-                muestras_capturadas = 0
                 letra_idx = max(letra_idx - 1, 0)
                 print(f"\n→ Letra: {LETRAS[letra_idx]}")
 

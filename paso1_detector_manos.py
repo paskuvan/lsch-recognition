@@ -7,8 +7,6 @@ BaseOptions = mp.tasks.BaseOptions
 HandLandmarker = mp.tasks.vision.HandLandmarker
 HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
 VisionRunningMode = mp.tasks.vision.RunningMode
-DrawingUtils = mp.tasks.vision.drawing_utils
-HandConnections = mp.tasks.vision.HandLandmarksConnections
 
 # Ruta al modelo (mismo directorio que el script)
 model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hand_landmarker.task")
