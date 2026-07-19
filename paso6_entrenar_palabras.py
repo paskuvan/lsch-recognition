@@ -5,6 +5,8 @@ from tensorflow import keras
 from sklearn.model_selection import train_test_split
 import json
 
+from extraccion_holistica import NUM_FEATURES
+
 # ============================================================
 # PASO 6: Entrenar modelo LSTM para palabras LSCH
 # ============================================================
@@ -31,7 +33,7 @@ PALABRAS = [
 ]
 
 FRAMES_POR_SECUENCIA = 30
-FEATURES_POR_FRAME = 63  # 21 landmarks × 3 coordenadas
+FEATURES_POR_FRAME = NUM_FEATURES  # pose (99) + 2 manos (63 c/u) = 225
 
 
 def cargar_datos():

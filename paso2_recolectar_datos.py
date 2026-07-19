@@ -53,13 +53,17 @@ def crear_carpetas():
 
 
 def extraer_landmarks(hand_landmarks):
-    """Extrae las coordenadas (x, y, z) de los 21 landmarks y las normaliza."""
+    """Extrae las coordenadas (x, y, z) de los 21 landmarks y las normaliza.
+
+    Normalización en dos pasos:
+    1. Restar la muñeca (landmark 0) → independiente de la posición en el frame.
+    2. Dividir por la distancia muñeca → nudillo del medio (landmark 9)
+       → independiente de la distancia a la cámara.
+    """
     coords = []
     for lm in hand_landmarks:
         coords.extend([lm.x, lm.y, lm.z])
 
-    # Normalizar: restar la posición de la muñeca (landmark 0)
-    # para que los datos no dependan de la posición en el frame
     wrist_x, wrist_y, wrist_z = coords[0], coords[1], coords[2]
     coords_norm = []
     for i in range(0, len(coords), 3):
@@ -68,6 +72,12 @@ def extraer_landmarks(hand_landmarks):
             coords[i + 1] - wrist_y,
             coords[i + 2] - wrist_z,
         ])
+
+    # Escala: distancia de la muñeca al nudillo del dedo medio (landmark 9)
+    sx, sy, sz = coords_norm[27], coords_norm[28], coords_norm[29]
+    escala = (sx * sx + sy * sy + sz * sz) ** 0.5
+    if escala > 1e-6:
+        coords_norm = [c / escala for c in coords_norm]
 
     return coords_norm
 

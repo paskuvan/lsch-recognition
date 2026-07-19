@@ -44,7 +44,10 @@ BUFFER_SIZE = 10
 
 
 def extraer_landmarks(hand_landmarks):
-    """Extrae y normaliza las coordenadas de los 21 landmarks."""
+    """Extrae y normaliza las coordenadas de los 21 landmarks.
+
+    Debe usar la MISMA normalización que paso2 (muñeca + escala).
+    """
     coords = []
     for lm in hand_landmarks:
         coords.extend([lm.x, lm.y, lm.z])
@@ -57,6 +60,13 @@ def extraer_landmarks(hand_landmarks):
             coords[i + 1] - wrist_y,
             coords[i + 2] - wrist_z,
         ])
+
+    # Escala: distancia muñeca → nudillo del dedo medio (landmark 9)
+    sx, sy, sz = coords_norm[27], coords_norm[28], coords_norm[29]
+    escala = (sx * sx + sy * sy + sz * sz) ** 0.5
+    if escala > 1e-6:
+        coords_norm = [c / escala for c in coords_norm]
+
     return coords_norm
 
 

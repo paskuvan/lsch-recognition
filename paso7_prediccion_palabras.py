@@ -5,37 +5,26 @@ import os
 import json
 import time
 from tensorflow import keras
-from collections import deque
+
+from extraccion_holistica import (
+    NUM_FEATURES,
+    crear_detectores,
+    dibujar_deteccion,
+    extraer_features,
+)
 
 # ============================================================
 # PASO 7: Predicción en vivo de palabras LSCH
 # ============================================================
 # Usa el modelo LSTM entrenado en el Paso 6 para reconocer
 # palabras/frases en lengua de señas chilena en tiempo real.
-# Acumula 30 frames de landmarks y los clasifica.
+# Acumula 30 frames de features (pose + 2 manos) y clasifica.
 # ============================================================
 
 # Rutas
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "modelo_palabras", "modelo_palabras.keras")
 LABELS_PATH = os.path.join(BASE_DIR, "modelo_palabras", "palabras.json")
-HAND_MODEL_PATH = os.path.join(BASE_DIR, "hand_landmarker.task")
-
-# Configuración MediaPipe
-BaseOptions = mp.tasks.BaseOptions
-HandLandmarker = mp.tasks.vision.HandLandmarker
-HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
-VisionRunningMode = mp.tasks.vision.RunningMode
-
-# Conexiones para dibujar
-HAND_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4),
-    (0, 5), (5, 6), (6, 7), (7, 8),
-    (0, 9), (9, 10), (10, 11), (11, 12),
-    (0, 13), (13, 14), (14, 15), (15, 16),
-    (0, 17), (17, 18), (18, 19), (19, 20),
-    (5, 9), (9, 13), (13, 17),
-]
 
 # Parámetros
 FRAMES_POR_SECUENCIA = 30
@@ -55,35 +44,6 @@ NOMBRES_DISPLAY = {
 }
 
 
-def extraer_landmarks(hand_landmarks):
-    """Extrae y normaliza las coordenadas de los 21 landmarks."""
-    coords = []
-    for lm in hand_landmarks:
-        coords.extend([lm.x, lm.y, lm.z])
-
-    wrist_x, wrist_y, wrist_z = coords[0], coords[1], coords[2]
-    coords_norm = []
-    for i in range(0, len(coords), 3):
-        coords_norm.extend([
-            coords[i] - wrist_x,
-            coords[i + 1] - wrist_y,
-            coords[i + 2] - wrist_z,
-        ])
-    return coords_norm
-
-
-def dibujar_mano(frame, hand_landmarks):
-    """Dibuja landmarks y conexiones."""
-    h, w, _ = frame.shape
-    for start, end in HAND_CONNECTIONS:
-        x1, y1 = int(hand_landmarks[start].x * w), int(hand_landmarks[start].y * h)
-        x2, y2 = int(hand_landmarks[end].x * w), int(hand_landmarks[end].y * h)
-        cv2.line(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    for lm in hand_landmarks:
-        cx, cy = int(lm.x * w), int(lm.y * h)
-        cv2.circle(frame, (cx, cy), 5, (255, 0, 0), -1)
-
-
 def main():
     # Cargar modelo y etiquetas
     print("Cargando modelo de palabras...")
@@ -93,18 +53,15 @@ def main():
         return
     model = keras.models.load_model(MODEL_PATH)
 
+    if model.input_shape[-1] != NUM_FEATURES:
+        print(f"❌ El modelo espera {model.input_shape[-1]} features por frame,")
+        print(f"   pero este script genera {NUM_FEATURES} (pose + 2 manos).")
+        print("   Recolecta datos con paso5 y reentrena con paso6.")
+        return
+
     with open(LABELS_PATH, "r") as f:
         PALABRAS = json.load(f)
     print(f"Modelo cargado: {len(PALABRAS)} palabras")
-
-    # Opciones del detector de manos
-    options = HandLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=HAND_MODEL_PATH),
-        running_mode=VisionRunningMode.VIDEO,
-        num_hands=1,
-        min_hand_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
-    )
 
     # Abrir cámara
     cap = cv2.VideoCapture(1)
@@ -123,7 +80,7 @@ def main():
         cap.read()
 
     print("\n" + "=" * 50)
-    print("  PREDICCIÓN DE PALABRAS - LSCH")
+    print("  PREDICCIÓN DE PALABRAS - LSCH (manos + pose)")
     print("=" * 50)
     print("\nControles:")
     print("  ESPACIO  = Iniciar captura de secuencia")
@@ -145,8 +102,8 @@ def main():
     # Historial de palabras detectadas
     historial = []
 
-    with HandLandmarker.create_from_options(options) as landmarker:
-
+    hand_landmarker, pose_landmarker = crear_detectores()
+    try:
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -157,17 +114,16 @@ def main():
 
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
-            result = landmarker.detect_for_video(mp_image, frame_timestamp_ms)
+            hand_result = hand_landmarker.detect_for_video(mp_image, frame_timestamp_ms)
+            pose_result = pose_landmarker.detect_for_video(mp_image, frame_timestamp_ms)
 
             h, w, _ = frame.shape
-            mano_detectada = False
+            mano_detectada = bool(hand_result.hand_landmarks)
 
-            if result.hand_landmarks:
-                hand_landmarks = result.hand_landmarks[0]
-                mano_detectada = True
-                dibujar_mano(frame, hand_landmarks)
+            dibujar_deteccion(frame, hand_result, pose_result)
 
-                coords = extraer_landmarks(hand_landmarks)
+            if mano_detectada:
+                coords = extraer_features(hand_result, pose_result)
 
                 # Modo continuo: mantener buffer deslizante
                 if modo_continuo:
@@ -179,7 +135,7 @@ def main():
                     ahora = time.time()
                     if (len(buffer_frames) == FRAMES_POR_SECUENCIA and
                             ahora - ultima_prediccion_time > COOLDOWN_SEGUNDOS):
-                        secuencia = np.array(buffer_frames).reshape(1, FRAMES_POR_SECUENCIA, 63)
+                        secuencia = np.array(buffer_frames).reshape(1, FRAMES_POR_SECUENCIA, NUM_FEATURES)
                         pred = model.predict(secuencia, verbose=0)[0]
                         idx = np.argmax(pred)
                         conf = pred[idx]
@@ -202,7 +158,7 @@ def main():
                     buffer_frames.append(coords)
                     if len(buffer_frames) >= FRAMES_POR_SECUENCIA:
                         grabando = False
-                        secuencia = np.array(buffer_frames).reshape(1, FRAMES_POR_SECUENCIA, 63)
+                        secuencia = np.array(buffer_frames).reshape(1, FRAMES_POR_SECUENCIA, NUM_FEATURES)
                         pred = model.predict(secuencia, verbose=0)[0]
                         idx = np.argmax(pred)
                         conf = pred[idx]
@@ -220,14 +176,15 @@ def main():
                         buffer_frames = []
             else:
                 if grabando:
-                    buffer_frames.append([0.0] * 63)
+                    # Sin manos: igual acumular (pose puede seguir visible)
+                    buffer_frames.append(extraer_features(hand_result, pose_result))
                     if len(buffer_frames) >= FRAMES_POR_SECUENCIA:
                         grabando = False
                         buffer_frames = []
                         prediccion_actual = "Sin mano detectada"
                         confianza_actual = 0.0
 
-                # En modo continuo, sin mano se reinicia el buffer deslizante
+                # En modo continuo, sin manos se reinicia el buffer deslizante
                 if modo_continuo:
                     buffer_frames.clear()
 
@@ -273,7 +230,7 @@ def main():
                 cv2.putText(frame, f"Buffer: {buf_size}/{FRAMES_POR_SECUENCIA}",
                             (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
             elif not mano_detectada:
-                cv2.putText(frame, "Muestra tu mano", (20, 125),
+                cv2.putText(frame, "Muestra tus manos", (20, 125),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
             elif not modo_continuo:
                 cv2.putText(frame, "ESPACIO = capturar sena", (20, 125),
@@ -314,6 +271,9 @@ def main():
                 prediccion_actual = ""
                 confianza_actual = 0.0
                 print("  🗑️ Historial limpiado")
+    finally:
+        hand_landmarker.close()
+        pose_landmarker.close()
 
     cap.release()
     cv2.destroyAllWindows()

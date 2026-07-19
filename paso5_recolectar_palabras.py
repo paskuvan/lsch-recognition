@@ -4,22 +4,22 @@ import os
 import time
 import numpy as np
 
+from extraccion_holistica import (
+    NUM_FEATURES,
+    crear_detectores,
+    dibujar_deteccion,
+    extraer_features,
+)
+
 # ============================================================
 # PASO 5: Recolectar datos de secuencias para palabras LSCH
 # ============================================================
-# Las palabras/frases en lengua de señas son dinámicas (tienen
-# movimiento). Este script captura secuencias de 30 frames de
-# landmarks y las guarda como archivos .npy para entrenar un
-# modelo LSTM después.
+# Las palabras/frases en lengua de señas son dinámicas y usan
+# las dos manos + la posición respecto al cuerpo. Este script
+# captura secuencias de 30 frames con pose (33 pts) y ambas
+# manos (21 pts c/u) = 225 features por frame, y las guarda
+# como archivos .npy para entrenar un modelo LSTM después.
 # ============================================================
-
-# Configuración MediaPipe
-BaseOptions = mp.tasks.BaseOptions
-HandLandmarker = mp.tasks.vision.HandLandmarker
-HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
-VisionRunningMode = mp.tasks.vision.RunningMode
-
-model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hand_landmarker.task")
 
 # Carpeta donde se guardarán los datos
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "datos_palabras")
@@ -42,16 +42,6 @@ MUESTRAS_POR_PALABRA = 30
 # Cuántos frames por secuencia (~1 segundo a 30fps)
 FRAMES_POR_SECUENCIA = 30
 
-# Conexiones para dibujar la mano
-HAND_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4),
-    (0, 5), (5, 6), (6, 7), (7, 8),
-    (0, 9), (9, 10), (10, 11), (11, 12),
-    (0, 13), (13, 14), (14, 15), (15, 16),
-    (0, 17), (17, 18), (18, 19), (19, 20),
-    (5, 9), (9, 13), (13, 17),
-]
-
 # Nombres bonitos para mostrar en pantalla
 NOMBRES_DISPLAY = {
     "hola": "HOLA",
@@ -73,38 +63,6 @@ def crear_carpetas():
     print(f"Carpetas creadas en: {DATA_DIR}")
 
 
-def extraer_landmarks(hand_landmarks):
-    """Extrae y normaliza las coordenadas de los 21 landmarks."""
-    coords = []
-    for lm in hand_landmarks:
-        coords.extend([lm.x, lm.y, lm.z])
-
-    # Normalizar respecto a la muñeca (landmark 0)
-    wrist_x, wrist_y, wrist_z = coords[0], coords[1], coords[2]
-    coords_norm = []
-    for i in range(0, len(coords), 3):
-        coords_norm.extend([
-            coords[i] - wrist_x,
-            coords[i + 1] - wrist_y,
-            coords[i + 2] - wrist_z,
-        ])
-    return coords_norm
-
-
-def dibujar_mano(frame, hand_landmarks):
-    """Dibuja landmarks y conexiones en el frame."""
-    h, w, _ = frame.shape
-    for start, end in HAND_CONNECTIONS:
-        x1 = int(hand_landmarks[start].x * w)
-        y1 = int(hand_landmarks[start].y * h)
-        x2 = int(hand_landmarks[end].x * w)
-        y2 = int(hand_landmarks[end].y * h)
-        cv2.line(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    for lm in hand_landmarks:
-        cx, cy = int(lm.x * w), int(lm.y * h)
-        cv2.circle(frame, (cx, cy), 5, (255, 0, 0), -1)
-
-
 def contar_muestras_existentes(palabra):
     """Cuenta cuántas secuencias (.npy) ya existen para una palabra."""
     carpeta = os.path.join(DATA_DIR, palabra)
@@ -113,17 +71,17 @@ def contar_muestras_existentes(palabra):
     return len([f for f in os.listdir(carpeta) if f.endswith(".npy")])
 
 
+def guardar_secuencia(palabra, secuencia):
+    """Guarda una secuencia como .npy y devuelve el nombre del archivo."""
+    seq_array = np.array(secuencia, dtype=np.float32)  # (30, 225)
+    num_existentes = contar_muestras_existentes(palabra)
+    filename = f"seq_{num_existentes:04d}.npy"
+    np.save(os.path.join(DATA_DIR, palabra, filename), seq_array)
+    return filename, num_existentes + 1
+
+
 def main():
     crear_carpetas()
-
-    # Opciones del detector
-    options = HandLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=model_path),
-        running_mode=VisionRunningMode.VIDEO,
-        num_hands=1,
-        min_hand_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
-    )
 
     # Abrir cámara
     cap = cv2.VideoCapture(1)
@@ -142,7 +100,7 @@ def main():
         cap.read()
 
     print("\n" + "=" * 50)
-    print("  RECOLECTOR DE PALABRAS - LSCH")
+    print("  RECOLECTOR DE PALABRAS - LSCH (manos + pose)")
     print("=" * 50)
     print("\nControles:")
     print("  ESPACIO  = Iniciar grabación de secuencia")
@@ -155,13 +113,13 @@ def main():
 
     palabra_idx = 0
     grabando = False
-    secuencia_actual = []  # Frames de la secuencia actual
+    secuencia_actual = []
     frame_timestamp_ms = 0
-    cuenta_regresiva = 0  # Countdown antes de grabar
+    cuenta_regresiva = 0
     cuenta_inicio = 0
 
-    with HandLandmarker.create_from_options(options) as landmarker:
-
+    hand_landmarker, pose_landmarker = crear_detectores()
+    try:
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -172,59 +130,36 @@ def main():
 
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
-            result = landmarker.detect_for_video(mp_image, frame_timestamp_ms)
+            hand_result = hand_landmarker.detect_for_video(mp_image, frame_timestamp_ms)
+            pose_result = pose_landmarker.detect_for_video(mp_image, frame_timestamp_ms)
 
             palabra_actual = PALABRAS[palabra_idx]
             nombre_display = NOMBRES_DISPLAY.get(palabra_actual, palabra_actual)
             existentes = contar_muestras_existentes(palabra_actual)
             h, w, _ = frame.shape
-            mano_detectada = False
+            mano_detectada = bool(hand_result.hand_landmarks)
+
+            dibujar_deteccion(frame, hand_result, pose_result)
 
             # Cuenta regresiva (independiente de si hay mano visible)
             if cuenta_regresiva > 0:
                 elapsed = time.time() - cuenta_inicio
                 if cuenta_regresiva - elapsed <= 0:
-                    # Empezar a grabar
                     grabando = True
                     secuencia_actual = []
                     cuenta_regresiva = 0
                     print(f"  🔴 ¡GRABANDO!")
 
-            # Detectar mano
-            if result.hand_landmarks:
-                hand_landmarks = result.hand_landmarks[0]
-                mano_detectada = True
-                dibujar_mano(frame, hand_landmarks)
+            # Grabar frames: extraer_features rellena con ceros
+            # los slots de manos/pose no detectadas
+            if grabando:
+                secuencia_actual.append(extraer_features(hand_result, pose_result))
 
-                # Grabar frames de la secuencia
-                if grabando:
-                    coords = extraer_landmarks(hand_landmarks)
-                    secuencia_actual.append(coords)
-
-                    if len(secuencia_actual) >= FRAMES_POR_SECUENCIA:
-                        # Guardar secuencia
-                        grabando = False
-                        seq_array = np.array(secuencia_actual)  # (30, 63)
-                        num_existentes = contar_muestras_existentes(palabra_actual)
-                        filename = f"seq_{num_existentes:04d}.npy"
-                        filepath = os.path.join(DATA_DIR, palabra_actual, filename)
-                        np.save(filepath, seq_array)
-                        print(f"  ✅ Secuencia guardada: {filename} ({num_existentes + 1}/{MUESTRAS_POR_PALABRA})")
-                        secuencia_actual = []
-
-            else:
-                # Si no se detecta mano durante grabación, rellenar con ceros
-                if grabando:
-                    secuencia_actual.append([0.0] * 63)
-                    if len(secuencia_actual) >= FRAMES_POR_SECUENCIA:
-                        grabando = False
-                        seq_array = np.array(secuencia_actual)
-                        num_existentes = contar_muestras_existentes(palabra_actual)
-                        filename = f"seq_{num_existentes:04d}.npy"
-                        filepath = os.path.join(DATA_DIR, palabra_actual, filename)
-                        np.save(filepath, seq_array)
-                        print(f"  ⚠️ Secuencia guardada (con frames vacíos): {filename}")
-                        secuencia_actual = []
+                if len(secuencia_actual) >= FRAMES_POR_SECUENCIA:
+                    grabando = False
+                    filename, num = guardar_secuencia(palabra_actual, secuencia_actual)
+                    print(f"  ✅ Secuencia guardada: {filename} ({num}/{MUESTRAS_POR_PALABRA})")
+                    secuencia_actual = []
 
             # ---- Interfaz en pantalla ----
             overlay = frame.copy()
@@ -254,15 +189,13 @@ def main():
                 cv2.putText(frame, f"Preparate... {int(restante) + 1}", (20, 130),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 3)
             elif grabando:
-                frames_restantes = FRAMES_POR_SECUENCIA - len(secuencia_actual)
-                # Barra de grabación
                 grab_pct = len(secuencia_actual) / FRAMES_POR_SECUENCIA
                 cv2.rectangle(frame, (20, 105), (20 + 300, 125), (100, 100, 100), -1)
                 cv2.rectangle(frame, (20, 105), (20 + int(300 * grab_pct), 125), (0, 0, 255), -1)
                 cv2.putText(frame, f"GRABANDO... {len(secuencia_actual)}/{FRAMES_POR_SECUENCIA}",
                             (330, 122), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             elif not mano_detectada:
-                cv2.putText(frame, "Muestra tu mano", (20, 130),
+                cv2.putText(frame, "Muestra tus manos", (20, 130),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
             else:
                 cv2.putText(frame, "ESPACIO = grabar secuencia", (20, 130),
@@ -278,7 +211,6 @@ def main():
                     color = (0, 255, 255)
                 cv2.putText(frame, nombre, (x_pos, y_lista),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2 if i == palabra_idx else 1)
-                # Calcular ancho del texto para espaciar
                 (text_w, _), _ = cv2.getTextSize(nombre, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
                 x_pos += text_w + 20
 
@@ -292,7 +224,6 @@ def main():
                 if existentes >= MUESTRAS_POR_PALABRA:
                     print(f"  ⚠️ '{nombre_display}' ya tiene {MUESTRAS_POR_PALABRA} muestras")
                 else:
-                    # Cuenta regresiva de 3 segundos
                     cuenta_regresiva = 3
                     cuenta_inicio = time.time()
                     print(f"  ⏳ Preparate para '{nombre_display}'... 3 segundos")
@@ -308,6 +239,9 @@ def main():
                 cuenta_regresiva = 0
                 palabra_idx = max(palabra_idx - 1, 0)
                 print(f"\n→ Palabra: {NOMBRES_DISPLAY.get(PALABRAS[palabra_idx], PALABRAS[palabra_idx])}")
+    finally:
+        hand_landmarker.close()
+        pose_landmarker.close()
 
     cap.release()
     cv2.destroyAllWindows()
